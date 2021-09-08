@@ -5,3 +5,4 @@ notebooks/
 references/
 reports/
 src.egg-info/
+venv/
