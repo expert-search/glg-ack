@@ -2,11 +2,11 @@
 -e .
 
 # external requirements
-click
-pandas
 altair
-scikit-learn
-streamlit
 awscli
 awsebcli
+pandas
+scikit-learn
+spacy
+streamlit
 transformers

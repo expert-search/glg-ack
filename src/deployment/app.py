@@ -1,11 +1,14 @@
 import pickle
 from pathlib import Path
+from sys import getfilesystemencodeerrors
 
+import spacy
+import numpy as np
 import tensorflow as tf
 import streamlit as st
 import pandas as pd
 import altair as alt
-from transformers.models.bert.modeling_tf_bert import TFBertMainLayer
+from transformers.models.distilbert.modeling_tf_distilbert import TFDistilBertMainLayer  # required
 
 
 ## Page Setup
@@ -19,40 +22,48 @@ with st.sidebar:
 ## Session State
 model_dir = Path('__file__').resolve().parents[2]/'models'
 def get_object(fname, fmethod='rb'):
-    if '.hdf5' in fname:
-        return model_dir/fname
     with open(model_dir/fname, fmethod) as f:
         return pickle.load(f) if '.pkl' in fname else f.read()
 
 def get_bert_clf():
-    model = tf.keras.models.model_from_json(get_object('bert_model.json', 'r'))
-    model.load_weights(get_object('bert_weights.hdf5'))
+    model = tf.keras.models.model_from_json(get_object('distilbert_model.json', 'r'))
+    model.load_weights(model_dir/'distilbert_weights.hdf5')
     return model
 
-session_vars = {'tfidf', 'clf', 'bert_clf', 'bert_tkzr'}
+session_vars = {'bert_clf', 'bert_tkzr'}
 if not session_vars.intersection(set(st.session_state)):
-    st.session_state.tfidf = get_object('grail_qa_tfidf.pkl')
-    st.session_state.clf = get_object('grail_qa_lr.pkl')
-    st.session_state.bert_tkzr = get_object('bert_tokenizer.pkl')
+    st.session_state.bert_tkzr = get_object('distilbert_tokenizer.pkl')
     st.session_state.bert_clf = get_bert_clf()
+    st.session_state.ner = spacy.load('en_core_web_md')  # spacy.load(model_dir/'kaggleTrainedNER10000')
 
-tfidf = st.session_state.tfidf
-clf = st.session_state.clf
-bert_tkzr = st.session_state.bert_tkzr
-bert_clf = st.session_state.bert_clf
+def ss(key):
+    return st.session_state[key]
 
-def predict(query, clf_type):
-    clf_types = ['bert', 'lr']
+bert_tkzr = ss('bert_tkzr')
+bert_clf = ss('bert_clf')
+ner = ss('ner')
+
+## Helpers
+
+def predict(query, clf_type, probas=False):
+    clf_types = ['bert']
     if clf_type not in clf_types:
         raise ValueError(f'`clf_type` must be one of {clf_types}')
     if clf_type == 'bert':
         x = bert_tkzr(query, padding='max_length', max_length=100, truncation=True, return_tensors='tf')
         pred = bert_clf(x['input_ids'])
         pred = tf.math.softmax(pred['label']).numpy()  # Convert to probabilities
-    if clf_type == 'lr':
-        pred = clf.predict_proba(tfidf.transform([query]))
-    
-    return pred
+        pred = pred[:, [0, 2, 1]]
+
+    return pred if probas else np.argmax(pred)
+
+def apply_ner(query, ner):
+    pred = ner(query)
+    ignore = ['CARDINAL', 'DATE', 'MONEY', 'ORDINAL', 'PERCENT', 'QUANTITY', 'TIME']
+    return [ent.text for ent in pred.ents if ent.label_ not in ignore]
+
+def show_df(labels):
+    st.write(df[df['Label']].reset_index(drop=True))
 
 ## Apps
 if page == SIMPLE_PREDICTION:
@@ -61,36 +72,62 @@ if page == SIMPLE_PREDICTION:
 
     Our model automatically classifies client queries as being either healthcare-related or technology-related. You can test it out below.
     """
-    query = st.text_input('Enter your query:')
+    query = st.text_area('Enter your query:')
     if len(query) == 0:
-        st.write('_Prediction: _')
+        st.write('Prediction:')
+        st.write('Entities:')
     else:
-        pred = predict(query, 'bert')
-        pred = pd.DataFrame(pred, index=['probability'], columns=['Healthcare', 'Technology'])
+        pred = predict(query, 'bert', probas=True)
+        pred = pd.DataFrame(pred, index=['probability'], columns=['Healthcare', 'Technology', 'Other'])
         st.write(pred.style.format(precision=4))
-        healthcare_proba, technology_proba = pred.Healthcare[0], pred.Technology[0]
-        if healthcare_proba < 0.7 and technology_proba < 0.7:
-            pred = 'Other'
-        else:
-            pred = 'Healthcare' if healthcare_proba > technology_proba else 'Technology'
-        st.write(f'_Prediction: {pred}_')
+        st.write(f'Prediction: {pred.columns[np.argmax(pred)]}')
+        st.write(f'Entities: {apply_ner(query, ner)}')
 
 elif page == SHOWCASE:
     # MORE FEATURES:
     # - Provide DF with ['date_received', 'client', 'label', 'hover_for_full_query', 'NER hashtags'] -- clients can be random from Fortune-500
     # - Hashtags show a DF with connected experts (random names)
-    # - Provide manual review
     # - Show graph of entity tags over time
-    from demo import n_tech, n_heal, df
+
+    # Demo Setup
+    from demo import add_fake_metadata, get_unique_tags, get_filterable_df, filter_df, df_done
+    if 'demo_df' not in st.session_state:
+        n = 10
+        label_map = {0: 'Healthcare', 1: 'Technology', 2: 'Other'}
+        with open('demo/all_sentences_list.pkl', 'rb') as f:
+            queries = pickle.load(f)[:n]
+        preds, tags = [], []
+        pbar = st.progress(0)
+        for i, item in enumerate(queries):
+            pbar.progress((i+1)/n)
+            preds.append(label_map[predict(item, 'bert')])
+            tags.append(apply_ner(item, ss('ner')))
+        df = pd.DataFrame({'Label': preds, 'Hashtags': tags, 'Query': queries})
+        st.session_state.demo_df = add_fake_metadata(df)
+    df = st.session_state.demo_df
     """
     # Welcome, GLG Agent
     ---
     """
-    c = alt.Chart(df, title='Last Week\'s Queries Per Day').mark_line().encode(x=alt.X('monthdate(Date)', title='Date'), y=alt.Y('count(Client)', title='Num Queries'), color='Label').configure_legend(title=None, orient='bottom-left')
+    df_chart = pd.concat([df, df_done])
+    df_chart = df_chart[df_chart['Label'] != 'Other']
+    c = alt.Chart(df_chart, title='Queries Over the Past Week').mark_line().encode(x=alt.X('monthdate(Date)', title='Day'), y=alt.Y('count(Client)', title='Num Queries'), color='Label').configure_legend(title=None, orient='bottom-left')
     st.altair_chart(c, use_container_width=True)
-    f"## There are {n_tech} technology queries available:"
-    with st.expander('View'):
-        st.write(df[df['Label'] == 'Technology'].reset_index(drop=True))
-    f"## There are {n_heal} healthcare queries available:"
-    with st.expander('View'):
-        st.write(df[df['Label'] == 'Healthcare'].reset_index(drop=True))
+    df_tech = df[df['Label'] == 'Technology']
+    df_heal = df[df['Label'] == 'Healthcare']
+    df_else = df[df['Label'] == 'Other']
+    f"## There are {len(df_tech)} technology queries available today:"
+    with st.expander(''):
+        tags_tech = st.multiselect('', get_unique_tags(df_tech), help='In the box below, you can type or select to filter queries by hashtag')
+        df_tech = get_filterable_df(df_tech)
+        st.write(filter_df(df_tech, tags_tech))
+    f"## There are {len(df_heal)} healthcare queries available today:"
+    with st.expander(''):
+        tags_heal = st.multiselect('', get_unique_tags(df_heal), help='In the box below, you can type or select to filter queries by hashtag')
+        df_heal = get_filterable_df(df_heal)
+        st.write(filter_df(df_heal, tags_heal))
+    f"## There are {len(df_else)} queries needing manual review today:"
+    with st.expander(''):
+        tags_else = st.multiselect('', get_unique_tags(df_else), help='In the box below, you can type or select to filter queries by hashtag')
+        df_else = get_filterable_df(df_else)
+        st.write(filter_df(df_else, tags_else))
