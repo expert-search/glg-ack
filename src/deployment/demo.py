@@ -1,4 +1,5 @@
 ## Hard-coded variables for demo day
+import pickle
 from datetime import date, timedelta
 
 import numpy as np
@@ -7,41 +8,49 @@ import pandas as pd
 today = date.today()
 past_week = [today - timedelta(days=i) for i in range(1, 8)]
 
-# Randomize sample size
-n_tech = np.random.randint(150, 196)
-n_heal = np.random.randint(70, 79)
-n_done = np.random.randint(1300, 1700)
-n_else = np.random.randint(12, 18)
+# Simulate client names
+clients_tech = pd.read_csv('demo/fortune-tech.csv')['Client']
+clients_heal = pd.read_csv('demo/fortune-heal.csv')['Client']
+clients_else = ['Gryffindor', 'Hufflepuff', 'Ravenclaw', 'Slytherin']
 
-df_tech = pd.read_csv('demo/fortune-tech.csv')
-df_heal = pd.read_csv('demo/fortune-heal.csv')
+def set_random_clients(df, label):
+    client_map = {'Technology': clients_tech, 'Healthcare': clients_heal, 'Other': clients_else}
+    df.loc[df['Label'] == label, 'Client'] = np.random.choice(client_map[label], size=len(df[df['Label'] == label]))
+    return df
 
-df_tech = df_tech.sample(n_tech)
-df_heal = df_heal.sample(n_heal)
-df_tech['Label'] = 'Technology'
-df_heal['Label'] = 'Healthcare'
-df_tech['Date'] = [today] * n_tech
-df_heal['Date'] = [today] * n_heal
+def add_fake_clients(df):
+    df['Client'] = ''
+    for label in ['Technology', 'Healthcare', 'Other']:
+        df = set_random_clients(df, label)
+    return df
 
-# Simulate unconfident predictions
-df_else = pd.DataFrame({
-    'Client': np.random.choice(['Gryffindor', 'Hufflepuff', 'Ravenclaw', 'Slytherin'], size=n_else),
-    'Label': ['Other'] * n_else,
-    'Date': [today] * n_else
-})
+def add_fake_date(df):
+    df['Date'] = [today] * len(df)
+    return df
+
+def add_fake_metadata(df):
+    df = add_fake_clients(df)
+    df = add_fake_date(df)
+    return df[['Client', 'Label', 'Date', 'Hashtags', 'Query']]
 
 # Simulate queries over the last week
+n_done = np.random.randint(1300, 1700)
 df_done = pd.DataFrame({
     'Client': ['Completed'] * n_done,
     'Label': np.random.choice(['Technology', 'Healthcare'], size=n_done, p=[0.6, 0.4]),
-    'Date': np.random.choice(past_week, size=n_done)
+    'Date': np.random.choice(past_week, size=n_done),
+    'Hashtags': [[] for _ in range(n_done)],
+    'Query': [''] * n_done
 })
 
-df_chart = pd.concat([df_tech, df_heal, df_done])
-df = pd.concat([df_tech, df_heal, df_else])
+def get_unique_tags(df):
+    return np.unique([t for htags in df['Hashtags'] for t in htags])
 
-with open('demo/entities.txt', 'rt') as f:
-    entities = [x.strip() for x in f.readlines()]
+def get_filterable_df(df):
+        df_tags = pd.DataFrame(df['Hashtags'].to_list(), index=df.index)
+        df = df.merge(df_tags, left_index=True, right_index=True)
+        return df
 
-df_entities = pd.DataFrame([np.random.choice(entities, size=np.random.randint(2, 5)) for _ in range(len(df))])
-df = df.merge(df_entities, left_index=True, right_index=True)
+def filter_df(df, tags):
+    cols_to_show = ['Client', 'Label', 'Date', 'Hashtags', 'Query']
+    return df.loc[df.iloc[:, 5:].isin(tags).any(axis=1), cols_to_show].reset_index(drop=True)
