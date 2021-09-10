@@ -1,6 +1,5 @@
 import pickle
 from pathlib import Path
-from sys import getfilesystemencodeerrors
 
 import spacy
 import numpy as np
