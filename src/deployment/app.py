@@ -22,10 +22,12 @@ with st.sidebar:
 ## Session State
 model_dir = Path('__file__').resolve().parents[2]/'models'
 def get_object(fname, fmethod='rb'):
+    """Generic function for loading different files from disk into memory."""
     with open(model_dir/fname, fmethod) as f:
         return pickle.load(f) if '.pkl' in fname else f.read()
 
 def get_bert_clf():
+    """Loads a TF DistilBERT model from disk. Requires a TF model JSON and matching weights HDF5."""
     model = tf.keras.models.model_from_json(get_object('distilbert_model.json', 'r'))
     model.load_weights(model_dir/'distilbert_weights.hdf5')
     return model
@@ -48,6 +50,7 @@ ner_drug = ss('ner_drug')
 ## Helpers
 
 def predict(query, clf_type, probas=False):
+    """Makes a prediction on `query` using `clf_type`, optionally returning probabilities."""
     clf_types = ['bert']
     if clf_type not in clf_types:
         raise ValueError(f'`clf_type` must be one of {clf_types}')
@@ -60,6 +63,10 @@ def predict(query, clf_type, probas=False):
     return pred if probas else np.argmax(pred)
 
 def apply_ners(query, ners):
+    """
+    Applies each NER model passed in `ners` on `query`, taking the union set of their predictions.
+    Ignores various types of entities not useful for the business case.
+    """
     ignore = ['CARDINAL', 'DATE', 'MONEY', 'ORDINAL', 'PERCENT', 'QUANTITY', 'TIME']
     if not isinstance(ners, Iterable):
         ners = [ners]
@@ -70,6 +77,10 @@ def apply_ners(query, ners):
     return list(preds)
 
 def show_df_by_tags(df, tags):
+    """
+    Filters `df` by `tags` and streamlines DataFrame appearance in the UI,
+    depending on whether `df` contains query or expert data.
+    """
     return st.dataframe(filter_df(df, tags)) if not 'Expert' in df.columns else st.dataframe(filter_df(df, tags), height=150, width=450)
 
 ## Apps
