@@ -1,8 +1,6 @@
 import pickle
-import json
 from pathlib import Path
 
-import tensorflow as tf
 from transformers import BertTokenizerFast, DistilBertTokenizerFast
 from transformers.models.bert.modeling_tf_bert import TFBertMainLayer
 

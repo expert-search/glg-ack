@@ -90,6 +90,10 @@ if page == SIMPLE_PREDICTION:
 
     We have two pipelines that operate on incoming text queries: a classification pipeline that predicts text as healthcare-related or technology-related, and a named entity recognition pipeline that tags entities in the text. You can test it out below.
     """
+    with st.expander('Examples'):
+        "In November 2019, Tesla announced the release of the Cybertruck, the company’s all electric pickup truck and the automaker’s sixth vehicle since its founding. While initial research had been conducted, our clients at Gerson-Lehrman Group still had questions regarding consumer sentiment about electric trucks and where the luxury brand’s truck fit into the market before making an investment decision."
+        "Repeated surveys of more than 7,800 10- to 14-year-olds between September 2019 and August 2020 found the overall rate of addiction remained stable, according to the U.S. National Institute on Drug Abuse (NIDA). What did change was their preference: Alcohol use fell, while use of prescription medication and tobacco products rose."
+        "Aided by a formidable performance from Hong Kong superstar Tony Leung, director Destin Daniel Cretton doesn't quite remake the Marvel wheel so much as he enlivens it with the kinetic, charming and surprisingly heartfelt Shang-Chi."  # Allyson Johnson (Cambridge Day)
     query = st.text_area('Enter your query:')
     if len(query) == 0:
         st.write('Prediction:')
